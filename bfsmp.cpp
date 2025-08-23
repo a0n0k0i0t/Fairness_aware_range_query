@@ -11,9 +11,11 @@ using namespace std;
 
 int d, t;
 double eps = 1e-9;
+int orgCr=0,orgCb=0;
 struct Point {
     vector<double> coords; // d + t dimensions combined
     int index;
+    int color_id;
 };
 
 struct QueryBox {
@@ -312,21 +314,21 @@ vector<FeatureBox> splitFeatureBoxMasked(const FeatureBox &fbox, const Point &p,
     vector<FeatureBox> subBoxes;
     
     for(int i = 0; i <d; i++) { // Generate t-1 sub-boxes for next skyline points
-        FeatureBox box = fbox;        
+        FeatureBox box = fbox; 
+        // cout<<p.coords.size()<<" "<<fbox.bounds.size()<<"\n";       
         for(int j = 0; j < i; j++) {
             if (((mask >> j) & 1) == 0) {
-                box.bounds[j].first = max(p.coords[d + j], box.bounds[j].first);
+                box.bounds[j].first = max(p.coords[j], box.bounds[j].first);
             } else {
-                box.bounds[j].second = min(p.coords[d + j], box.bounds[j].second);
+                box.bounds[j].second = min(p.coords[j], box.bounds[j].second);
             }
         }
         
         if (((mask >> i) & 1) == 0) {
-            box.bounds[i].second = min(p.coords[d + i] - 1e-9, box.bounds[i].second);
+            box.bounds[i].second = min(p.coords[i] - 1e-9, box.bounds[i].second);
         } else {
-            box.bounds[i].first = max(p.coords[d + i] + 1e-9, box.bounds[i].first);
+            box.bounds[i].first = max(p.coords[i] + 1e-9, box.bounds[i].first);
         }
-        
         
         bool valid = true;
         for (int j = 0; j < d; j++) {
@@ -335,7 +337,12 @@ vector<FeatureBox> splitFeatureBoxMasked(const FeatureBox &fbox, const Point &p,
                 break;
             }
         }
-        
+        for(int j=0;j<d;j++){
+            if(box.bounds[j].first == fbox.bounds[j].first && box.bounds[j].second == fbox.bounds[j].second){
+                valid = false;
+                break;
+            }
+        }
         if (valid) {
             subBoxes.push_back(box);
         }
@@ -373,9 +380,9 @@ vector<FeatureBox> splitFeatureBox(const FeatureBox &fbox, const Point &p) {
 
 vector<Point*> findSkyline(RangeTreeNode *root, const QueryBox &qbox, int mask) {
     FeatureBox fullBox;
-    fullBox.bounds.resize(t);
-    for (int i = 0; i < t; i++) {
-        fullBox.bounds[i] = { -numeric_limits<double>::infinity(), numeric_limits<double>::infinity() };
+    fullBox.bounds.resize(d);
+    for (int i = 0; i < d; i++) {
+        fullBox.bounds[i] = { qbox.bounds[i].first, qbox.bounds[i].second };
     }
 
     stack<FeatureBox> Z;
@@ -391,7 +398,10 @@ vector<Point*> findSkyline(RangeTreeNode *root, const QueryBox &qbox, int mask) 
     while (!Z.empty()) {
         FeatureBox R = Z.top(); Z.pop();
         vector<Point *> canonicals;
-        
+        cout<<"Processing FeatureBox: [ ";
+        for (int i = 0; i < d; i++) {
+            cout << R.bounds[i].first << ", " << R.bounds[i].second << " ";
+        }
         int size = 0;
         dDRangeQuery(root, const_cast<QueryBox &>(qbox), R, 0, d+t, d-1, d, t, canonicals,size);
         Point *best = nullptr;
@@ -409,8 +419,9 @@ vector<Point*> findSkyline(RangeTreeNode *root, const QueryBox &qbox, int mask) 
             cout << "] Features [ ";
             for (int i = 0; i < t; i++) cout << best->coords[d + i] << " ";
             cout << "]\n";
-
+            // cout<<R.bounds.size()<<"\n";
             auto subBoxes = splitFeatureBoxMasked(R, *best,mask);
+    
             for (auto it = subBoxes.rbegin(); it != subBoxes.rend(); ++it) {
                 Z.push(*it);
             }
@@ -418,6 +429,7 @@ vector<Point*> findSkyline(RangeTreeNode *root, const QueryBox &qbox, int mask) 
                 skyline.push_back(best);
                 reported.insert(best->index);
             }
+            
         }
     }
     return skyline;
@@ -460,6 +472,13 @@ void bruteForceSkyline(const QueryBox& qbox) {
     }
 }
 
+bool isSamebound(QueryBox &Q1, QueryBox& Q2, int dim){
+    for(int i=0;i<dim;i++){
+        if(Q1.bounds[i].first!=Q2.bounds[i].first)return 0;
+        if(Q1.bounds[i].second!=Q2.bounds[i].second)return 0;
+    }
+    return 1;
+}
 
 vector<QueryBox> generateCornerSkylineRanges(
     const QueryBox& qbox,
@@ -468,38 +487,40 @@ vector<QueryBox> generateCornerSkylineRanges(
 
     int d = qbox.bounds.size();
     vector<QueryBox> corner_ranges;
-
+    QueryBox copybox = qbox;
     int total_masks = 1 << d;
 
     for (int mask = 0; mask < total_masks; ++mask) {
         QueryBox newbox = qbox;
         for (int i = 0; i < d; ++i) {
             if ((mask >> i) & 1) {
-                if (best_rhs[i] < 1e17){
+                // if (best_rhs[i] < 1e17){
                     newbox.bounds[i].first = newbox.bounds[i].second;
                     newbox.bounds[i].second = best_rhs[i];
-                }
+                // }
             } else {
-                if (best_lhs[i] > -1e17){
+                // if (best_lhs[i] > -1e17){
                     newbox.bounds[i].second = newbox.bounds[i].first;
                     newbox.bounds[i].first = best_lhs[i];
-                }
+                // }
             }
         }
-
+        bool valid = true;
+        for (int i = 0; i < d; ++i) {
+            if (newbox.bounds[i].first > newbox.bounds[i].second) {
+                valid = false;
+                break;
+            }
+        }   
+        if(isSamebound(newbox, copybox, d))valid=false;
+        if (!valid) continue;
         corner_ranges.push_back(newbox);
     }
 
     return corner_ranges;
 }
 
-bool isSamebound(QueryBox &Q1, QueryBox& Q2, int dim){
-    for(int i=0;i<dim;i++){
-        if(Q1.bounds[i].first!=Q2.bounds[i].first)return 0;
-        if(Q1.bounds[i].second!=Q2.bounds[i].second)return 0;
-    }
-    return 1;
-}
+
 
 QueryBox intersectBoxes(const QueryBox& Q, const QueryBox& neighbor, int d, bool& valid) {
     QueryBox intersectBox;
@@ -519,6 +540,42 @@ QueryBox intersectBoxes(const QueryBox& Q, const QueryBox& neighbor, int d, bool
     return intersectBox;
 }
 
+double computeUThreshold(
+    int Cr, int Cb, int intersection, int uni,
+    int Wr, int Wb, int eps)
+{
+    int delta = Wb * Cb - Wr * Cr; // δ from paper
+    double bestU = 0.0;
+
+    if (delta > eps) {
+        for (int Cr_prime = 0; Cr_prime <= uni; ++Cr_prime) {
+            int Bprime = std::max(delta - eps - Wr * Cr_prime, 0) / Wb;
+            double sim = (intersection - Bprime) / (double)(uni + Cr_prime);
+            bestU = std::max(bestU, sim);
+        }
+        for (int Cb_prime = 0; Cb_prime <= uni; ++Cb_prime) {
+            int Rprime = std::max(delta - eps - Wb * Cb_prime, 0) / Wr;
+            double sim = (intersection - Cb_prime) / (double)(uni + Rprime);
+            bestU = std::max(bestU, sim);
+        }
+    }
+    if (delta < -eps) {
+        for (int Cb_prime = 0; Cb_prime <= uni; ++Cb_prime) {
+            int Rprime = std::max(-delta - eps - Wb * Cb_prime, 0) / Wr;
+            double sim = (intersection - Rprime) / (double)(uni + Cb_prime);
+            bestU = std::max(bestU, sim);
+        }
+        for (int Cr_prime = 0; Cr_prime <= uni; ++Cr_prime) {
+            int Bprime = std::max(-delta - eps - Wr * Cr_prime, 0) / Wb;
+            double sim = (intersection - Cr_prime) / (double)(uni + Bprime);
+            bestU = std::max(bestU, sim);
+        }
+    }
+    return bestU;
+}
+
+
+
 void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
     FeatureBox fullBox;
     fullBox.bounds.resize(t);
@@ -526,18 +583,23 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
         fullBox.bounds[i] = { -numeric_limits<double>::infinity(), numeric_limits<double>::infinity() };
     }
 
-    priority_queue<pair<double, int>>pq;
+    priority_queue<vector<double>>pq;
     vector<QueryBox>boxes;
     int pos=0;
     boxes.push_back(qbox);
-    pq.push({1.0,0});
+    pq.push({1.0,0,orgCr,orgCb});
     int base_size=0;
     vector<Point *> base_canonicals;
     dDRangeQuery(root, const_cast<QueryBox &>(qbox), fullBox, 0, d, d-1, d, t, base_canonicals,base_size);
     cout<<"Base size: "<<base_size<<"\n";
     QueryBox intersect_box;
     while(!pq.empty()){
-        double sim = pq.top().first; int ind = pq.top().second; QueryBox box = boxes[ind];
+        auto priority = pq.top();
+        double sim = priority[0];
+        int pos = priority[1];
+        QueryBox box = boxes[pos];
+        int Cr=priority[2], Cb=priority[3];
+        
         pq.pop();
         vector<Point*>cur_canonicals;
         int subtree_size=0;
@@ -547,7 +609,7 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
         for(int i=0;i<d;i++)
             cout<<box.bounds[i].first<<" "<<box.bounds[i].second<<"\n";
         cout<<"\n";
-        if(subtree_size>=7){
+        if(Cr==Cb){
             cout<<"BFS Ans Range: \n";
             for(int i=0;i<d;i++){
                 cout<<"["<<box.bounds[i].first<<" "<<box.bounds[i].second<<"], ";
@@ -558,31 +620,53 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
             break;
         }
         vector<double> lhs_expands, rhs_expands;
+        cout<<"Current Box: \n";
+        for(int i=0;i<d;i++){
+            cout<<"["<<box.bounds[i].first<<" "<<box.bounds[i].second<<"], ";
+        }
+        cout<<"\n";
         for (int dim = 0; dim < d; ++dim) {
             vector<Point*> out;
             int size=0;
             side_expand_2(trees[dim], box, fullBox, 0, d, dim, d, t,  out, size);
-            // cout<<"Expand Dim: "<<dim<<"\n";
-            // for(auto e: out){
-            //     for(int i=0;i<d;i++)
-            //     cout<<e->coords[i]<<" ";
-            //     cout<<"\n";
-            // }
-            // cout<<"\n";
+            cout<<"Expand Dim: "<<dim<<"\n";
+            for(auto e: out){
+                for(int i=0;i<d;i++)
+                cout<<e->coords[i]<<" ";
+                cout<<"\n";
+            }
+            cout<<"\n";
+            Point* lhs_shrink_pt_ptr = nullptr;
+            Point* rhs_shrink_pt_ptr = nullptr;
+            Point* lhs_expand_pt_ptr = nullptr;
+            Point* rhs_expand_pt_ptr = nullptr;
+
             double lhs_bound=-numeric_limits<double>::infinity(),rhs_bound = numeric_limits<double>::infinity();
             double lhs_shrink_pt=box.bounds[dim].second, rhs_shrink_pt=box.bounds[dim].first;
-            for(auto p: out){
-                if (p->coords[dim] < box.bounds[dim].first)
-                    lhs_bound = max(lhs_bound, p->coords[dim]);
-                
-                if (p->coords[dim] > box.bounds[dim].second)
-                    rhs_bound = min(rhs_bound, p->coords[dim]);
-                
-                if(p->coords[dim]> box.bounds[dim].first && p->coords[dim]< box.bounds[dim].second){
-                    lhs_shrink_pt = min(lhs_shrink_pt, p->coords[dim]);
-                    rhs_shrink_pt = max(rhs_shrink_pt, p->coords[dim]);
+            for(auto pt : out) {
+                if (pt->coords[dim] < box.bounds[dim].first) {
+                    if (pt->coords[dim] > lhs_bound) {
+                        lhs_bound = pt->coords[dim];
+                        lhs_expand_pt_ptr = pt;
+                    }
+                } else if (pt->coords[dim] > box.bounds[dim].second) {
+                    if (pt->coords[dim] < rhs_bound) {
+                        rhs_bound = pt->coords[dim];
+                        rhs_expand_pt_ptr = pt;
+                    }
+                } else{
+                    if (pt->coords[dim] < lhs_shrink_pt) {
+                        lhs_shrink_pt = pt->coords[dim];
+                        lhs_shrink_pt_ptr = pt;
+                    }
+                    if (pt->coords[dim] > rhs_shrink_pt) {
+                        rhs_shrink_pt = pt->coords[dim];
+                        rhs_shrink_pt_ptr = pt;
+                    }
                 }
             }
+                
+            
             QueryBox lhs_expanded_box = box, rhs_expanded_box = box, lhs_shrink_box = box, rhs_shrink_box = box;
             vector<Point*> canonicals;
             int intersection_size, union_size;
@@ -603,8 +687,11 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
                 union_size+=base_size-intersection_size;
                 double cor_sim = (double)(intersection_size)/(double)(union_size);
                 if(cor_sim<sim){
+                    int newCr=Cr,newCb=Cb;
+                    if(lhs_expand_pt_ptr->color_id == 1)newCr++;
+                    else if(lhs_expand_pt_ptr->color_id == 2)newCb++;
                     boxes.push_back(lhs_expanded_box);
-                    pq.push({cor_sim,++pos});
+                    pq.push({cor_sim,++pos,newCr,newCb});
                 }
             }
             rhs_expanded_box.bounds[dim].second = rhs_bound;
@@ -619,8 +706,12 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
                 union_size+=base_size-intersection_size;
                 double cor_sim = (double)(intersection_size)/(double)(union_size);
                 if(cor_sim<sim){
+                    int newCr=Cr,newCb=Cb;
+                    if(rhs_expand_pt_ptr->color_id == 1)newCr++;
+                    else if(rhs_expand_pt_ptr->color_id == 2)newCb++;
                     boxes.push_back(rhs_expanded_box);
-                    pq.push({cor_sim,++pos});
+                    pq.push({cor_sim,++pos,newCr,newCb});
+                    
                 }
             }
 
@@ -636,12 +727,15 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
                 union_size+=base_size-intersection_size;
                 double cor_sim = (double)(intersection_size)/(double)(union_size);
                 if(cor_sim<sim){
+                    int newCr=Cr,newCb=Cb;
+                    if(lhs_shrink_pt_ptr->color_id == 1)newCr--;
+                    else if(lhs_shrink_pt_ptr->color_id == 2)newCb--;
                     boxes.push_back(lhs_shrink_box);
-                    pq.push({cor_sim,++pos});
+                    pq.push({cor_sim,++pos,newCr,newCb});
                 }
             }
 
-
+            
             rhs_shrink_box.bounds[dim].second = rhs_shrink_pt;
             bool valid4=0;
             intersect_box = intersectBoxes(qbox,rhs_shrink_box,d,valid4);
@@ -654,14 +748,24 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
                 union_size+=base_size-intersection_size;
                 double cor_sim = (double)(intersection_size)/(double)(union_size);
                 if(cor_sim<sim){
+                   
+                    int newCr=Cr,newCb=Cb;
+                    if(rhs_shrink_pt_ptr->color_id == 1)newCr--;
+                    else if(rhs_shrink_pt_ptr->color_id == 2)newCb--;
                     boxes.push_back(rhs_shrink_box);
-                    pq.push({cor_sim,++pos});
+                    pq.push({cor_sim,++pos,newCr,newCb});
                 }
             }
         }
         // if(lhs_expands.size() || rhs_expands.size()){
+        for(int i=0;i<d;i++){
+            cout<<"["<<lhs_expands[i]<<" "<<rhs_expands[i]<<"] ";
+        }
+        for(int i=0;i<d;i++)
+            cout<<box.bounds[i].first<<" "<<box.bounds[i].second<<"\n";
+        cout<<"\n";
         vector<QueryBox> corner_boxes = generateCornerSkylineRanges(box, lhs_expands, rhs_expands);
-    
+        cout<<corner_boxes.size()<<" corner boxes\n";
         for (int i=0;i<corner_boxes.size();i++) {
             const auto & corner_box = corner_boxes[i];
             vector<Point*> skyline = findSkyline(root, corner_box, i);
@@ -688,8 +792,11 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
                     union_size+=base_size-intersection_size;
                     double cor_sim = (double)(intersection_size)/(double)(union_size);
                     if(cor_sim<sim){
+                        int newCr=Cr,newCb=Cb;
+                        if(pt->color_id == 1)newCr++;
+                        else if(pt->color_id == 2)newCb++;
                         boxes.push_back(neighbor);
-                        pq.push({cor_sim,++pos});
+                        pq.push({cor_sim,++pos,newCr,newCb});
                     }
                 }
             }
@@ -814,6 +921,13 @@ int main() {
         points[i].index = i;
     }
 
+    cout << "Enter color_id id of each point:\n";
+    
+    for (int i = 0; i < n; i++) {
+        cin>> points[i].color_id;
+    }
+
+
     vector<Point *> point_ptrs(n);
     for (int i = 0; i < n; ++i) point_ptrs[i] = &points[i];
     
@@ -828,29 +942,21 @@ int main() {
     for (int i = 0; i < d; i++) {
         cin >> qbox.bounds[i].first >> qbox.bounds[i].second;
     }
+
+    
+    for(int i=0;i<n;i++){
+        if(points[i].color_id==1 && inRangeBox(points[i], qbox)){
+            orgCr++;
+        }
+        if(points[i].color_id==2 && inRangeBox(points[i], qbox)){
+            orgCb++;
+        }
+    }
     bruteAlgo(qbox,point_ptrs,t,d);
     bfs(trees, qbox, root);
     return 0;
 }
 
-/*
-10 
-4 7
-12 35 15 10   5 12 35 8 15 10 10
-18 45 14 9    6 18 45 9 14 9 11
-15 38 17 11   7 15 38 8 17 11 9
-13 50 15 13   4 13 50 7 15 13 10
-19 59 13 8    8 19 59 8 13 8 12
-10 40 16 14   3 10 40 7 16 14 10
-11 37 15 12   5 11 37 8 15 12 10
-17 60 15 9    2 17 60 6 15 9 13
-22 42 14 11   6 22 42 9 14 11 9
-9  33 17 10   1 9  33 5 17 10 10
-15 15
-45 45
-15 15
-10 10
-*/
 
 /*
 10 
@@ -865,6 +971,9 @@ int main() {
 17 60 15 9    2 17 60 6 15 9 13
 22 42 14 11   6 22 42 9 14 11 9
 9  33 17 10   1 9  33 5 17 10 10
+
+1 2 1 1 2 1 1 2 1 2 
+
 10 20
 30 60
 5 15
@@ -872,12 +981,18 @@ int main() {
 */
 
 /*
-4
+5
+2 0
+2 2
+3 2
 2 3
-10 10   5 10 15
-15 15   4 12 16
-12 12   6 9 14
-18 18   5 10 13
-10 20
-10 20
+1 1
+4 4
+1
+2
+1
+2
+1
+2 3
+2 3
 */
