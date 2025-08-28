@@ -609,7 +609,7 @@ void bfs(vector<RangeTreeNode *> &trees, QueryBox &qbox, RangeTreeNode* root){
         for(int i=0;i<d;i++)
             cout<<box.bounds[i].first<<" "<<box.bounds[i].second<<"\n";
         cout<<"\n";
-        if(Cr==Cb){
+        if(Cr==Cb+1){
             cout<<"BFS Ans Range: \n";
             for(int i=0;i<d;i++){
                 cout<<"["<<box.bounds[i].first<<" "<<box.bounds[i].second<<"], ";
@@ -869,19 +869,22 @@ void bruteAlgo(QueryBox &Q, vector<Point *>& points, int t, int d) {
             if (validBox) {
                 double union_size = 0.0;
                 double intersection_size = 0.0;
-                double curr_size = 0.0;
+                double Cr=0,Cb=0;
 
                 for (int k = 0; k < n; k++) {
                     bool inQ = inRangeQ(points[k], Q, d, t);
                     bool inB = inRangeQ(points[k], box, d, t);
                     if (inQ && inB) intersection_size += 1.0;
                     if (inQ || inB) union_size += 1.0;
-                    if (inB) curr_size += 1.0;
+                    if (inB){
+                        if(points[k]->color_id==1)Cr+=1.0;
+                        else if(points[k]->color_id==2)Cb+=1.0;
+                    }
                 }
 
                 // cout << intersection_size << " " << union_size << " " << curr_size << "\n";
 
-                if (curr_size >= 7 && union_size > 0.0) {
+                if ( Cr==Cb+1 && union_size > 0.0) {
                     double sim = intersection_size / union_size;
                     if (sim > max_sim) {
                         max_sim = sim;
